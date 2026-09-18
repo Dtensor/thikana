@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thikana</title>
+<style>
+  :root { --paper:#faf7f0; --ink:#1d1b16; --muted:#6b6557; --line:#ddd6c6; --accent:#9a3b1f; --ok:#2f6b3a; --bad:#a32020; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.5 Georgia, 'Times New Roman', serif; }
+  main { max-width:640px; margin:0 auto; padding:28px 16px 60px; }
+  h1 { font-size:26px; margin:0 0 2px; letter-spacing:.02em; }
+  .sub { color:var(--muted); margin:0 0 22px; font-size:15px; }
+  input { width:100%; padding:13px; font:inherit; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); }
+  button, a.btn { display:inline-block; padding:11px 15px; margin:6px 6px 0 0; font:inherit; font-size:15px; border:1px solid var(--ink); border-radius:8px; background:#fff; color:var(--ink); text-decoration:none; cursor:pointer; }
+  button.primary { background:var(--ink); color:var(--paper); }
+  #out { margin-top:22px; border-top:1px solid var(--line); padding-top:18px; }
+  .words { font-size:24px; color:var(--accent); word-break:break-word; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:14px 0; font-size:15px; }
+  dt { color:var(--muted); } dd { margin:0; font-family:ui-monospace, Menlo, monospace; word-break:break-all; }
+  .err { color:var(--bad); } .note { color:var(--muted); font-size:13.5px; margin-top:22px; }
+  pre { background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; white-space:pre-wrap; word-break:break-all; font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Thikana</h1>
+  <p class="sub">Five words for any square metre on Earth. Open algorithm, no app, nothing sent to any server.</p>
+  <input id="q" placeholder="five.words · 27.17501,78.04213 · 16 digits" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button class="primary" id="go">Find</button>
+  <button id="here">Use my location</button>
+  <div id="out"></div>
+  <p class="note">The grid is 1 m, but a phone's GPS is usually only good to 3–5 m; for true precision, type coordinates read off a map. This page works offline once saved. It decodes in your browser; the part of the link after # never leaves your device.</p>
+</main>
+<script>
+/*CORE-START*/
+const WORDS = /*WORDS*/[];
+const LAT_N = 18000001, LON_N = 36000000, LAT_BITS = 25, LON_BITS = 26;
+const BY_PREFIX = new Map(WORDS.map((w, i) => [w.slice(0, 4), i]));
+const BY_WORD = new Map(WORDS.map((w, i) => [w, i]));
+const ALIASES = new Map(/*ALIASES*/"".split('|').filter(Boolean).map(l => {
+  const [heard, t] = l.split(' ');
+  return [heard, t.split(',').map(x => [+x[0], x.slice(1)])];
+}));
+class BadCode extends Error {}
+
+function quantise(lat, lon) {
+  if (!(lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) throw new BadCode('coordinates out of range');
+  return [Math.round((lat + 90) * 1e5), Math.round((lon + 180) * 1e5) % LON_N];
+}
+function unquantise(la, lo) {
+  if (la >= LAT_N || lo >= LON_N) throw new BadCode('code decodes to a point that is not on Earth');
+  return [+(la / 1e5 - 90).toFixed(5), +(lo / 1e5 - 180).toFixed(5)];
+}
+function interleave(la, lo) {
+  let n = 0n;
+  for (let i = LON_BITS - 1; i >= 0; i--) {
+    n = (n << 1n) | BigInt(Math.floor(lo / 2 ** i) % 2);
+    if (i < LAT_BITS) n = (n << 1n) | BigInt(Math.floor(la / 2 ** i) % 2);
+  }
+  return n;
+}
+function deinterleave(n) {
+  let la = 0, lo = 0, pos = LAT_BITS + LON_BITS;
+  for (let i = LON_BITS - 1; i >= 0; i--) {
+    lo = lo * 2 + Number((n >> BigInt(--pos)) & 1n);
+    if (i < LAT_BITS) la = la * 2 + Number((n >> BigInt(--pos)) & 1n);
+  }
+  return [la, lo];
+}
+function crc4(n, bits) {
+  let reg = 0;
+  for (let i = bits - 1; i >= 0; i--) {
+    const top = ((reg >> 3) & 1) ^ Number((n >> BigInt(i)) & 1n);
+    reg = (reg << 1) & 0xF;
+    if (top) reg ^= 0x3;
+  }
+  return reg;
+}
+function encode(lat, lon) {
+  const loc = interleave(...quantise(lat, lon));
+  const payload = (loc << 4n) | BigInt(crc4(loc, 51));
+  const out = [];
+  for (let k = 4; k >= 0; k--) out.push(WORDS[Number((payload >> BigInt(11 * k)) & 0x7FFn)]);
+  return out.join('.');
+}
+function tokens(code) {
+  const parts = code.toLowerCase().replace(/\u2019/g, "'").match(/[a-z]+(?:'[a-z]+)?/g) || [];
+  if (parts.length !== 5) throw new BadCode('need 5 words, got ' + parts.length);
+  return parts;
+}
+function indexOf(tok) {
+  if (BY_WORD.has(tok)) return BY_WORD.get(tok);
+  const h = (ALIASES.get(tok) || []).filter(a => a[0] === 0);
+  if (h.length === 1) return BY_WORD.get(h[0][1]);
+  return BY_PREFIX.get(tok.replace("'", '').slice(0, 4));
+}
+function fromIndices(idx) {
+  let payload = 0n;
+  for (const i of idx) payload = (payload << 11n) | BigInt(i);
+  const loc = payload >> 4n;
+  if (crc4(loc, 51) !== Number(payload & 0xFn)) throw new BadCode('checksum mismatch: a word is wrong or misheard');
+  return unquantise(...deinterleave(loc));
+}
+function decode(code) {
+  return fromIndices(tokens(code).map(p => {
+    const i = indexOf(p);
+    if (i === undefined) throw new BadCode('unknown word: ' + p);
+    return i;
+  }));
+}
+function repair(code) {
+  const parts = tokens(code), base = parts.map(indexOf), out = new Map();
+  parts.forEach((tok, pos) => {
+    if (base.some((b, k) => k !== pos && b === undefined)) return;
+    for (const [dist, word] of ALIASES.get(tok) || []) {
+      const idx = base.slice(); idx[pos] = BY_WORD.get(word);
+      if (idx[pos] === base[pos]) continue;
+      try { const w = idx.map(i => WORDS[i]).join('.'); out.set(w, [dist, w, fromIndices(idx)]); } catch (e) {}
+    }
+  });
+  return [...out.values()].sort((a, b) => a[0] - b[0] || (a[1] < b[1] ? -1 : 1));
+}
+function luhn(d) {
+  let t = 0;
+  [...d].reverse().forEach((ch, i) => { let x = +ch * (i % 2 === 0 ? 2 : 1); t += x > 9 ? x - 9 : x; });
+  return (10 - t % 10) % 10;
+}
+function encodeDigits(lat, lon) {
+  const [la, lo] = quantise(lat, lon);
+  const body = String(la * LON_N + lo).padStart(15, '0');
+  return (body + luhn(body)).match(/.{4}/g).join(' ');
+}
+function decodeDigits(code) {
+  const s = code.replace(/\D/g, '');
+  if (s.length !== 16 || luhn(s.slice(0, 15)) !== +s[15]) throw new BadCode('bad numeric code: wrong length or check digit');
+  const n = Number(s.slice(0, 15));
+  return unquantise(Math.floor(n / LON_N), n % LON_N);
+}
+function plusCode(lat, lon) {
+  const A = '23456789CFGHJMPQRVWX';
+  let la = Math.min(Math.max(lat + 90, 0), 180 - 1e-9), lo = ((lon + 180) % 360 + 360) % 360;
+  let code = '', res = 20;
+  for (let i = 0; i < 5; i++) {
+    const a = Math.floor(la / res), b = Math.floor(lo / res);
+    code += A[a] + A[b]; la -= a * res; lo -= b * res; res /= 20;
+    if (i === 3) code += '+';
+  }
+  const r = Math.floor(la / (res * 20 / 5)), c = Math.floor(lo / (res * 20 / 4));
+  return code + A[Math.min(r, 4) * 4 + Math.min(c, 3)];
+}
+function parseAny(text) {
+  const m = text.match(/^\s*(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)\s*$/);
+  if (m) { const q = quantise(+m[1], +m[2]); return unquantise(...q); }
+  if (/[a-z]/i.test(text)) return decode(text);
+  return decodeDigits(text);
+}
+/*CORE-END*/
+if (typeof document !== 'undefined') {
+  const $ = id => document.getElementById(id), out = $('out');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function show(lat, lon, accuracy) {
+    const code = encode(lat, lon), ll = lat.toFixed(5) + ',' + lon.toFixed(5);
+    const link = location.href.split('#')[0] + '#' + code;
+    const msg = code + '\n' + ll + '\n' + link;
+    history.replaceState(null, '', '#' + code);
+    out.innerHTML = '<div class="words">' + esc(code) + '</div><dl>' +
+      '<dt>Coordinates</dt><dd>' + ll + '</dd>' +
+      '<dt>Digits</dt><dd>' + encodeDigits(lat, lon) + '</dd>' +
+      '<dt>Plus Code</dt><dd>' + plusCode(lat, lon) + '</dd>' +
+      (accuracy ? '<dt>GPS accuracy</dt><dd>±' + Math.round(accuracy) + ' m (the fix, not the grid)</dd>' : '') + '</dl>' +
+      '<a class="btn" href="https://www.google.com/maps?q=' + ll + '">Google Maps</a>' +
+      '<a class="btn" href="https://maps.apple.com/?ll=' + ll + '&q=' + ll + '">Apple Maps</a>' +
+      '<a class="btn" href="https://mappls.com/@' + ll + '">Mappls</a>' +
+      '<a class="btn" href="https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lon + '#map=19/' + lat + '/' + lon + '">OpenStreetMap</a>' +
+      '<a class="btn" href="geo:' + ll + '">Default map app</a>' +
+      '<pre id="msg">' + esc(msg) + '</pre><button class="primary" id="share">Share this</button>';
+    $('share').onclick = () => navigator.share ? navigator.share({ text: msg }).catch(() => {}) :
+      navigator.clipboard.writeText(msg).then(() => { $('share').textContent = 'Copied'; });
+  }
+  function run(text) {
+    if (!text.trim()) return;
+    try { const [la, lo] = parseAny(text); show(la, lo); }
+    catch (e) {
+      let sug = [];
+      try { if (/[a-z]/i.test(text)) sug = repair(text).slice(0, 5); } catch (e2) {}
+      out.innerHTML = '<p class="err">' + esc(e.message) + '</p>' + (sug.length ? '<p>Did you mean (check with the sender):</p>' +
+        sug.map(s => '<button class="sug" data-c="' + esc(s[1]) + '">' + esc(s[1]) + '</button>').join('') : '');
+      out.querySelectorAll('.sug').forEach(b => { b.onclick = () => { $('q').value = b.dataset.c; run(b.dataset.c); }; });
+    }
+  }
+  $('go').onclick = () => run($('q').value);
+  $('q').onkeydown = e => { if (e.key === 'Enter') run($('q').value); };
+  $('here').onclick = () => navigator.geolocation.getCurrentPosition(
+    p => show(+p.coords.latitude.toFixed(5), +p.coords.longitude.toFixed(5), p.coords.accuracy),
+    e => { out.innerHTML = '<p class="err">Location unavailable: ' + esc(e.message) + '</p>'; },
+    { enableHighAccuracy: true, timeout: 20000 });
+  const fromHash = () => { const h = decodeURIComponent(location.hash.slice(1)); if (h) { $('q').value = h; run(h); } };
+  window.onhashchange = fromHash; fromHash();
+}
+</script>
+</body>
+</html>

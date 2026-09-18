@@ -46,3 +46,5 @@ A delivery rider cannot find a farmhouse gate. The owner opens the saved page, p
 - The first two words name an area of roughly 18 x 36 km; neighbours share them.
 - The format: 25 bits latitude + 26 bits longitude, interleaved, + CRC-4, cut into five 11-bit words. Only the first 4 letters of each word matter.
 - what3words and Mappls eLoc are secret recipes, so nobody can compute them offline. DIGIPIN is open but not added yet (needs checking against India Post's official code).
+
+*Grown-up note: MIT licensed. The word list is the BIP-0039 English list (MIT); the sound-alike tables are derived from the CMU Pronouncing Dictionary. Anyone may copy, mirror or reimplement this.*

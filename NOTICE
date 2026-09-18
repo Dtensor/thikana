@@ -1,0 +1,5 @@
+Third-party data
+- wordlist_en.txt is the BIP-0039 English word list (bitcoin/bips, MIT).
+- aliases_en.txt and aliases_full_en.txt are derived from the CMU Pronouncing
+  Dictionary, Copyright (c) Carnegie Mellon University, redistributed under its
+  BSD-style licence.

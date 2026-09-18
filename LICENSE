@@ -19,9 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Third-party data
-- wordlist_en.txt is the BIP-0039 English word list (bitcoin/bips, MIT).
-- aliases_en.txt and aliases_full_en.txt are derived from the CMU Pronouncing
-  Dictionary, Copyright (c) Carnegie Mellon University, redistributed under its
-  BSD-style licence.

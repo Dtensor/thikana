@@ -3,3 +3,6 @@ Third-party data
 - aliases_en.txt and aliases_full_en.txt are derived from the CMU Pronouncing
   Dictionary, Copyright (c) Carnegie Mellon University, redistributed under its
   BSD-style licence.
+- wordlist_hi.txt is selected from the Hindi word-frequency data of
+  hermitdave/FrequencyWords (OpenSubtitles 2018), content licensed CC-BY-SA-4.0.
+  That file is therefore shared under CC-BY-SA-4.0, not MIT.

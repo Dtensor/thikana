@@ -102,3 +102,13 @@ def test_wordlist_is_frozen():
 
     data = Path(t.__file__).with_name("wordlist_en.txt").read_bytes()
     assert hashlib.sha256(data).hexdigest() == "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"
+
+
+def test_hindi_roundtrip_and_spelling_variants():
+    assert len(t.WORDS_HI) == 2048 and len(t._BY_HI) == 2048
+    rng = random.Random(5)
+    for _ in range(5000):
+        lat, lon = round(rng.uniform(-90, 90), 5), round(rng.uniform(-180, 180), 5)
+        hi = t.encode(lat, lon, "hi")
+        assert t.decode(hi) == t.decode(t.encode(lat, lon))
+        assert t.decode(hi.replace("ी", "ि")) == t.decode(hi)

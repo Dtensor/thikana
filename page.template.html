@@ -26,7 +26,7 @@
 <main>
   <h1>Thikana</h1>
   <p class="sub">Five words for any square metre on Earth. Open algorithm, no app, nothing sent to any server.</p>
-  <input id="q" placeholder="five.words · 27.17501,78.04213 · 16 digits" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <input id="q" placeholder="five.words · पाँच शब्द · 27.17501,78.04213 · 16 digits" autocomplete="off" autocapitalize="off" spellcheck="false">
   <button class="primary" id="go">Find</button>
   <button id="here">Use my location</button>
   <div id="out"></div>
@@ -35,6 +35,10 @@
 <script>
 /*CORE-START*/
 const WORDS = /*WORDS*/[];
+const WORDS_HI = /*WORDS_HI*/[];
+const foldHi = w => w.replace(/\u0940/g, '\u093f').replace(/\u0942/g, '\u0941').replace(/\u093c/g, '')
+  .replace(/[\u0928\u092e\u0923\u0919\u091e]\u094d(?=[\u0915-\u0939])/g, '').replace(/[\u0901\u0902]/g, '');
+const BY_HI = new Map(WORDS_HI.map((w, i) => [foldHi(w), i]));
 const LAT_N = 18000001, LON_N = 36000000, LAT_BITS = 25, LON_BITS = 26;
 const BY_PREFIX = new Map(WORDS.map((w, i) => [w.slice(0, 4), i]));
 const BY_WORD = new Map(WORDS.map((w, i) => [w, i]));
@@ -77,12 +81,12 @@ function crc4(n, bits) {
   }
   return reg;
 }
-function encode(lat, lon) {
+function encode(lat, lon, lang) {
   const loc = interleave(...quantise(lat, lon));
   const payload = (loc << 4n) | BigInt(crc4(loc, 51));
   const out = [];
-  for (let k = 4; k >= 0; k--) out.push(WORDS[Number((payload >> BigInt(11 * k)) & 0x7FFn)]);
-  return out.join('.');
+  for (let k = 4; k >= 0; k--) out.push((lang === 'hi' ? WORDS_HI : WORDS)[Number((payload >> BigInt(11 * k)) & 0x7FFn)]);
+  return out.join(lang === 'hi' ? ' ' : '.');
 }
 function tokens(code) {
   const parts = code.toLowerCase().replace(/\u2019/g, "'").match(/[a-z]+(?:'[a-z]+)?/g) || [];
@@ -103,6 +107,15 @@ function fromIndices(idx) {
   return unquantise(...deinterleave(loc));
 }
 function decode(code) {
+  const hi = code.match(/[\u0900-\u097f]+/g);
+  if (hi) {
+    if (hi.length !== 5) throw new BadCode('need 5 words, got ' + hi.length);
+    return fromIndices(hi.map(h => {
+      const i = BY_HI.get(foldHi(h));
+      if (i === undefined) throw new BadCode('unknown word: ' + h);
+      return i;
+    }));
+  }
   return fromIndices(tokens(code).map(p => {
     const i = indexOf(p);
     if (i === undefined) throw new BadCode('unknown word: ' + p);
@@ -152,7 +165,7 @@ function plusCode(lat, lon) {
 function parseAny(text) {
   const m = text.match(/^\s*(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)\s*$/);
   if (m) { const q = quantise(+m[1], +m[2]); return unquantise(...q); }
-  if (/[a-z]/i.test(text)) return decode(text);
+  if (/[a-z\u0900-\u097f]/i.test(text)) return decode(text);
   return decodeDigits(text);
 }
 /*CORE-END*/
@@ -166,6 +179,7 @@ if (typeof document !== 'undefined') {
     history.replaceState(null, '', '#' + code);
     out.innerHTML = '<div class="words">' + esc(code) + '</div><dl>' +
       '<dt>Coordinates</dt><dd>' + ll + '</dd>' +
+      '<dt>Hindi (draft)</dt><dd style="font-family:inherit;font-size:17px">' + esc(encode(lat, lon, 'hi')) + '</dd>' +
       '<dt>Digits</dt><dd>' + encodeDigits(lat, lon) + '</dd>' +
       '<dt>Plus Code</dt><dd>' + plusCode(lat, lon) + '</dd>' +
       (accuracy ? '<dt>GPS accuracy</dt><dd>±' + Math.round(accuracy) + ' m (the fix, not the grid)</dd>' : '') + '</dl>' +

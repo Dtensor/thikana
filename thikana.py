@@ -15,6 +15,19 @@ WORDS = (Path(__file__).with_name("wordlist_en.txt")).read_text().split()
 _BY_PREFIX = {w[:4]: i for i, w in enumerate(WORDS)}
 _BY_WORD = {w: i for i, w in enumerate(WORDS)}
 
+_HI_CONS = "[क-ह]"
+
+
+def fold_hi(w: str) -> str:
+    """Spelling variants that sound the same: long/short i and u, anusvara vs half nasal."""
+    k = w.replace("ी", "ि").replace("ू", "ु").replace("़", "")
+    k = re.sub("[नमणङञ]्(?=" + _HI_CONS + ")", "", k)
+    return k.replace("ं", "").replace("ँ", "")
+
+
+WORDS_HI = (Path(__file__).with_name("wordlist_hi.txt")).read_text(encoding="utf-8").split()
+_BY_HI = {fold_hi(w): i for i, w in enumerate(WORDS_HI)}
+
 
 def load_aliases(name: str = "aliases_en.txt") -> dict[str, list[tuple[int, str]]]:
     out: dict[str, list[tuple[int, str]]] = {}
@@ -76,10 +89,12 @@ def _crc4(n: int, bits: int) -> int:
     return reg
 
 
-def encode(lat: float, lon: float) -> str:
+def encode(lat: float, lon: float, lang: str = "en") -> str:
     loc = _interleave(*_quantise(lat, lon))
     payload = (loc << CHECK_BITS) | _crc4(loc, LAT_BITS + LON_BITS)
     idx = [(payload >> (WORD_BITS * k)) & 0x7FF for k in range(N_WORDS - 1, -1, -1)]
+    if lang == "hi":
+        return " ".join(WORDS_HI[i] for i in idx)
     return ".".join(WORDS[i] for i in idx)
 
 
@@ -112,6 +127,14 @@ def _from_indices(idx: list[int]) -> tuple[float, float]:
 
 def decode(code: str) -> tuple[float, float]:
     idx = []
+    hi = re.findall("[ऀ-ॿ]+", code)
+    if hi:
+        if len(hi) != N_WORDS:
+            raise BadCode(f"need {N_WORDS} words, got {len(hi)}")
+        for h in hi:
+            if fold_hi(h) not in _BY_HI:
+                raise BadCode(f"unknown word: {h}")
+        return _from_indices([_BY_HI[fold_hi(h)] for h in hi])
     for p in _tokens(code):
         i = _index(p, ALIASES)
         if i is None:
@@ -182,6 +205,8 @@ def main(argv: list[str]) -> int:
         here = Path(__file__).parent
         words = "[" + ",".join(f'"{w}"' for w in WORDS) + "]"
         html = (here / "page.template.html").read_text().replace("/*WORDS*/[]", words)
+        hi = "[" + ",".join(f'"{w}"' for w in WORDS_HI) + "]"
+        html = html.replace("/*WORDS_HI*/[]", hi)
         alias_text = (here / "aliases_en.txt").read_text().strip().replace("\n", "|")
         html = html.replace('/*ALIASES*/""', '"' + alias_text + '"')
         (here / "index.html").write_text(html)
@@ -193,7 +218,8 @@ def main(argv: list[str]) -> int:
             lat, lon = float(m[1]), float(m[2])
             print(message(lat, lon))
             print(encode_digits(lat, lon))
-        elif re.search(r"[a-zA-Z]", arg):
+            print(encode(lat, lon, "hi") + "   (Hindi list is a DRAFT, may change)")
+        elif re.search(r"[a-zA-Zऀ-ॿ]", arg):
             print("%.5f,%.5f" % decode(arg))
         elif arg.strip():
             print("%.5f,%.5f" % decode_digits(arg))

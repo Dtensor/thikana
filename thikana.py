@@ -193,6 +193,26 @@ def decode_digits(code: str) -> tuple[float, float]:
     return _unquantise(*divmod(int(s[:15]), LON_N))
 
 
+_DIGI = ("FC98", "J327", "K456", "LMPT")
+
+
+def digipin(lat: float, lon: float) -> str | None:
+    """India Post DIGIPIN (10 chars, about 4 m). None outside its India bounding box."""
+    a, b, c, d = 2.5, 38.5, 63.5, 99.5
+    if not (a <= lat <= b and c <= lon <= d):
+        return None
+    out = ""
+    for _ in range(10):
+        dl, dn = (b - a) / 4, (d - c) / 4
+        row = max(0, min(3, 3 - int((lat - a) // dl)))
+        col = max(0, min(3, int((lon - c) // dn)))
+        out += _DIGI[row][col]
+        a, b = a + dl * (3 - row), a + dl * (4 - row)
+        c = c + dn * col
+        d = c + dn
+    return out
+
+
 def message(lat: float, lon: float, base: str = "https://dtensor.github.io/thikana/") -> str:
     code = encode(lat, lon)
     la, lo = decode(code)
@@ -219,6 +239,8 @@ def main(argv: list[str]) -> int:
             print(message(lat, lon))
             print(encode_digits(lat, lon))
             print(encode(lat, lon, "hi") + "   (Hindi list is a DRAFT, may change)")
+            if digipin(lat, lon):
+                print(f"DIGIPIN {digipin(lat, lon)}")
         elif re.search(r"[a-zA-Zऀ-ॿ]", arg):
             print("%.5f,%.5f" % decode(arg))
         elif arg.strip():

@@ -162,9 +162,108 @@ function plusCode(lat, lon) {
   const r = Math.floor(la / (res * 20 / 5)), c = Math.floor(lo / (res * 20 / 4));
   return code + A[Math.min(r, 4) * 4 + Math.min(c, 3)];
 }
+const DIGI = ['FC98', 'J327', 'K456', 'LMPT'], DIGI_B = [2.5, 38.5, 63.5, 99.5];
+function digipin(lat, lon) {
+  let [a, b, c, d] = DIGI_B;
+  if (lat < a || lat > b || lon < c || lon > d) return null;
+  let out = '';
+  for (let k = 0; k < 10; k++) {
+    const dl = (b - a) / 4, dn = (d - c) / 4;
+    const row = Math.max(0, Math.min(3, 3 - Math.floor((lat - a) / dl)));
+    const col = Math.max(0, Math.min(3, Math.floor((lon - c) / dn)));
+    out += DIGI[row][col];
+    b = a + dl * (4 - row); a = a + dl * (3 - row); c = c + dn * col; d = c + dn;
+  }
+  return out;
+}
+function fromDigipin(pin) {
+  const s = pin.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  let [a, b, c, d] = DIGI_B;
+  if (s.length !== 10) throw new BadCode('a DIGIPIN has 10 characters');
+  for (const ch of s) {
+    const row = DIGI.findIndex(r => r.includes(ch));
+    if (row < 0) throw new BadCode('not a DIGIPIN character: ' + ch);
+    const col = DIGI[row].indexOf(ch), dl = (b - a) / 4, dn = (d - c) / 4;
+    b = a + dl * (4 - row); a = a + dl * (3 - row); c = c + dn * col; d = c + dn;
+  }
+  return unquantise(...quantise((a + b) / 2, (c + d) / 2));
+}
+// QR code: byte mode, error level L, versions 1-5 (one Reed-Solomon block each). Returns rows of 0/1.
+function qr(text) {
+  const bytes = [...new TextEncoder().encode(text)];
+  const SPEC = [[19, 7], [34, 10], [55, 15], [80, 20], [108, 26]];
+  const ver = SPEC.findIndex(v => bytes.length <= v[0] - 2) + 1;
+  if (!ver) throw new Error('too long for this QR');
+  const [nData, nEc] = SPEC[ver - 1], size = 17 + 4 * ver;
+  const bits = [];
+  const push = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >> i) & 1); };
+  push(4, 4); push(bytes.length, 8); bytes.forEach(b => push(b, 8));
+  push(0, Math.min(4, nData * 8 - bits.length));
+  while (bits.length % 8) bits.push(0);
+  const data = [];
+  for (let i = 0; i < bits.length; i += 8) data.push(parseInt(bits.slice(i, i + 8).join(''), 2));
+  for (let pad = 0xEC; data.length < nData; pad ^= 0xEC ^ 0x11) data.push(pad);
+  const mul = (x, y) => { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >> 7) * 0x11D); z ^= ((y >> i) & 1) * x; } return z; };
+  const gen = new Array(nEc).fill(0); gen[nEc - 1] = 1;
+  for (let i = 0, root = 1; i < nEc; i++, root = mul(root, 2))
+    for (let j = 0; j < nEc; j++) gen[j] = mul(gen[j], root) ^ (j + 1 < nEc ? gen[j + 1] : 0);
+  const ec = new Array(nEc).fill(0);
+  for (const b of data) { const f = b ^ ec.shift(); ec.push(0); gen.forEach((g, i) => { ec[i] ^= mul(g, f); }); }
+  const stream = [];
+  data.concat(ec).forEach(b => { for (let i = 7; i >= 0; i--) stream.push((b >> i) & 1); });
+  const M = Array.from({ length: size }, () => new Array(size).fill(0));
+  const F = Array.from({ length: size }, () => new Array(size).fill(false));
+  const set = (x, y, v) => { if (x >= 0 && y >= 0 && x < size && y < size) { M[y][x] = v ? 1 : 0; F[y][x] = true; } };
+  const finder = (cx, cy) => { for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+    const r = Math.max(Math.abs(dx), Math.abs(dy)); set(cx + dx, cy + dy, r !== 2 && r !== 4); } };
+  finder(3, 3); finder(size - 4, 3); finder(3, size - 4);
+  if (ver > 1) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++)
+    set(size - 7 + dx, size - 7 + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+  for (let i = 8; i < size - 8; i++) { set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+  const format = mask => {
+    const d = (1 << 3) | mask; let rem = d;
+    for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >> 9) * 0x537);
+    const v = ((d << 10) | rem) ^ 0x5412, bit = i => (v >> i) & 1;
+    for (let i = 0; i <= 5; i++) set(8, i, bit(i));
+    set(8, 7, bit(6)); set(8, 8, bit(7)); set(7, 8, bit(8));
+    for (let i = 9; i < 15; i++) set(14 - i, 8, bit(i));
+    for (let i = 0; i < 8; i++) set(size - 1 - i, 8, bit(i));
+    for (let i = 8; i < 15; i++) set(8, size - 15 + i, bit(i));
+    set(8, size - 8, 1);
+  };
+  format(0);
+  let k = 0;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let vert = 0; vert < size; vert++) for (let j = 0; j < 2; j++) {
+      const x = right - j, y = ((right + 1) & 2) === 0 ? size - 1 - vert : vert;
+      if (!F[y][x]) M[y][x] = k < stream.length ? stream[k++] : 0;
+    }
+  }
+  const MASKS = [(x, y) => (x + y) % 2, (x, y) => y % 2, (x, y) => x % 3, (x, y) => (x + y) % 3,
+    (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2, (x, y) => x * y % 2 + x * y % 3,
+    (x, y) => (x * y % 2 + x * y % 3) % 2, (x, y) => ((x + y) % 2 + x * y % 3) % 2];
+  const apply = m => { for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (!F[y][x] && MASKS[m](x, y) === 0) M[y][x] ^= 1; };
+  const penalty = () => { let p = 0, dark = 0;
+    for (let y = 0; y < size; y++) for (let line = 0; line < 2; line++) { let run = 0, last = -1;
+      for (let x = 0; x < size; x++) { const v = line ? M[x][y] : M[y][x]; if (!line) dark += v;
+        if (v === last) { run++; if (run === 5) p += 3; else if (run > 5) p++; } else { run = 1; last = v; } } }
+    return p + Math.floor(Math.abs(dark * 20 / (size * size) - 10)) * 10; };
+  let best = 0, bestP = Infinity;
+  for (let m = 0; m < 8; m++) { apply(m); format(m); const p = penalty(); if (p < bestP) { bestP = p; best = m; } apply(m); }
+  apply(best); format(best);
+  return M;
+}
+function qrSvg(text, px) {
+  const m = qr(text), n = m.length + 8; let d = '';
+  m.forEach((row, y) => row.forEach((v, x) => { if (v) d += 'M' + (x + 4) + ',' + (y + 4) + 'h1v1h-1z'; }));
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + n + ' ' + n + '" width="' + px + '" height="' + px +
+    '" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
+}
 function parseAny(text) {
   const m = text.match(/^\s*(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)\s*$/);
   if (m) { const q = quantise(+m[1], +m[2]); return unquantise(...q); }
+  if (/^\s*[FCJKLMPT2-9]{3}[\s-]?[FCJKLMPT2-9]{3}[\s-]?[FCJKLMPT2-9]{4}\s*$/i.test(text)) return fromDigipin(text);
   if (/[a-z\u0900-\u097f]/i.test(text)) return decode(text);
   return decodeDigits(text);
 }
@@ -174,7 +273,7 @@ if (typeof document !== 'undefined') {
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function show(lat, lon, accuracy) {
     const code = encode(lat, lon), ll = lat.toFixed(5) + ',' + lon.toFixed(5);
-    const link = location.href.split('#')[0] + '#' + code;
+    const link = (/^https?:/.test(location.protocol) ? location.href.split('#')[0] : 'https://dtensor.github.io/thikana/') + '#' + code;
     const msg = code + '\n' + ll + '\n' + link;
     history.replaceState(null, '', '#' + code);
     out.innerHTML = '<div class="words">' + esc(code) + '</div><dl>' +
@@ -182,13 +281,15 @@ if (typeof document !== 'undefined') {
       '<dt>Hindi (draft)</dt><dd style="font-family:inherit;font-size:17px">' + esc(encode(lat, lon, 'hi')) + '</dd>' +
       '<dt>Digits</dt><dd>' + encodeDigits(lat, lon) + '</dd>' +
       '<dt>Plus Code</dt><dd>' + plusCode(lat, lon) + '</dd>' +
+      (digipin(lat, lon) ? '<dt>DIGIPIN</dt><dd>' + digipin(lat, lon) + ' (India Post, about 4 m)</dd>' : '') +
       (accuracy ? '<dt>GPS accuracy</dt><dd>±' + Math.round(accuracy) + ' m (the fix, not the grid)</dd>' : '') + '</dl>' +
       '<a class="btn" href="https://www.google.com/maps?q=' + ll + '">Google Maps</a>' +
       '<a class="btn" href="https://maps.apple.com/?ll=' + ll + '&q=' + ll + '">Apple Maps</a>' +
       '<a class="btn" href="https://mappls.com/@' + ll + '">Mappls</a>' +
       '<a class="btn" href="https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lon + '#map=19/' + lat + '/' + lon + '">OpenStreetMap</a>' +
       '<a class="btn" href="geo:' + ll + '">Default map app</a>' +
-      '<pre id="msg">' + esc(msg) + '</pre><button class="primary" id="share">Share this</button>';
+      '<pre id="msg">' + esc(msg) + '</pre><button class="primary" id="share">Share this</button>' +
+      '<details style="margin-top:14px"><summary>QR code for printing or a signboard</summary><div style="margin-top:10px">' + qrSvg(link, 240) + '</div></details>';
     $('share').onclick = () => navigator.share ? navigator.share({ text: msg }).catch(() => {}) :
       navigator.clipboard.writeText(msg).then(() => { $('share').textContent = 'Copied'; });
   }

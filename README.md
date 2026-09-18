@@ -32,7 +32,7 @@ Nothing. There is no server, no daemon, no database. That is the point.
 | `thikana.py <five.words>` | Words back to coordinates, checksum verified | Someone sent me words |
 | `thikana.py <16 digits>` | Digits back to coordinates | SMS / voice call |
 | `thikana.py build` | Bakes the word list into `index.html` | After changing the word list or page |
-| `pytest test_thikana.py` | 17 tests, 100k random round trips | After any codec change |
+| `pytest test_thikana.py` | 18 tests, 100k random round trips | After any codec change |
 
 ## One real example
 
@@ -46,6 +46,8 @@ A delivery rider cannot find a farmhouse gate. The owner opens the saved page, p
 - **Hindi (DRAFT):** the same square also has five Hindi words (`डोर पुल शिखर समीक्षक समिति` is the Taj Mahal example). Word number 731 in English and word number 731 in Hindi mean the same thing to the machine, so either language decodes to the same spot. Spelling slips that sound the same are forgiven (ि/ी, ु/ू, ं vs half-nasal, nukta). The list was machine-picked (subtitle word frequencies, then an AI pass to throw out names, English loanwords, verb forms and unpleasant words) and has NOT been reviewed by a person yet, so it may still change; the English words and the digits will not. The share link always carries the English words, because Devanagari inside a link often breaks in chat apps.
 - The first two words name an area of roughly 18 x 36 km; neighbours share them.
 - The format: 25 bits latitude + 26 bits longitude, interleaved, + CRC-4, cut into five 11-bit words. Only the first 4 letters of each word matter.
-- what3words and Mappls eLoc are secret recipes, so nobody can compute them offline. DIGIPIN is open but not added yet (needs checking against India Post's official code).
+- **DIGIPIN** (India Post's 10-character code, about 4 m, India only) is shown for every spot inside India, and you can type a DIGIPIN in to get the words. Checked against India Post's own published code on 5,003 points: zero differences. It is written from their published method, not copied, because their repository has no clear licence.
+- **QR code:** under every result there is a QR of the share link, for printing on a gate or a signboard. The QR maker is built into the page (no outside library). Five sample codes were read back correctly by a separate QR reader (OpenCV).
+- **Map buttons:** Apple Maps was opened and shows the pin at the exact coordinates. Mappls accepts the link and shows a "View location on map" button that carries the coordinates forward. what3words and Mappls eLoc are secret recipes, so nobody can compute them offline.
 
 *Grown-up note: MIT licensed. The word list is the BIP-0039 English list (MIT); the sound-alike tables are derived from the CMU Pronouncing Dictionary. Anyone may copy, mirror or reimplement this.*

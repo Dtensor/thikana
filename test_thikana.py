@@ -112,3 +112,8 @@ def test_hindi_roundtrip_and_spelling_variants():
         hi = t.encode(lat, lon, "hi")
         assert t.decode(hi) == t.decode(t.encode(lat, lon))
         assert t.decode(hi.replace("ी", "ि")) == t.decode(hi)
+
+
+def test_digipin_matches_india_post_example():
+    assert t.digipin(13.11179621, 80.20264269) == "4T396F42L7"  # example in India Post's source
+    assert t.digipin(51.5, -0.1) is None
